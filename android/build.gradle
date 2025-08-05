@@ -1,0 +1,35 @@
+buildscript {
+    ext {
+        compileSdkVersion = 33             // Sesuaikan versi SDK kamu
+        minSdkVersion = 21
+        targetSdkVersion = 33
+        kotlin_version = '1.7.10'          // Atau versi yang kamu gunakan
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:7.4.2'  // Pastikan sesuai versi Gradle kamu
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = "../build"
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}
