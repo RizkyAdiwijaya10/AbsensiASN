@@ -444,7 +444,8 @@ class _HomePagesState extends State<HomePages> {
   Future<void> _fetchUserData() async {
     try {
       final response = await http.get(
-        Uri.parse('http://192.168.1.100:8000/api/user'),
+        // Uri.parse('http://192.168.1.100:8000/api/user'),
+        Uri.parse('http://127.0.0.1:8000/api/user'),
         headers: {
           'Authorization': 'Bearer ${widget.token}',
           'Accept': 'application/json',
