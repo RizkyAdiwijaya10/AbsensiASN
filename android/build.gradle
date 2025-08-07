@@ -1,16 +1,16 @@
 buildscript {
     ext {
-        compileSdkVersion = 33             // Sesuaikan versi SDK kamu
-        minSdkVersion = 21
-        targetSdkVersion = 33
-        kotlin_version = '1.7.10'          // Atau versi yang kamu gunakan
+        compileSdkVersion = 34             // Diupdate ke versi terbaru (Android 14)
+        minSdkVersion = 21                 // Tetap sama (minimum Android 5.0)
+        targetSdkVersion = 34              // Diupdate ke versi terbaru
+        kotlin_version = '1.9.22'          // Diupdate ke versi terbaru
     }
     repositories {
         google()
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:7.4.2'  // Pastikan sesuai versi Gradle kamu
+        classpath 'com.android.tools.build:gradle:8.6.0'  // Diupdate ke versi terbaru
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
