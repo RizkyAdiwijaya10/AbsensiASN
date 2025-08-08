@@ -6,12 +6,15 @@ import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AbsensiPage extends StatefulWidget {
-  const AbsensiPage({super.key, required String nipBaru});
+  final String nipBaru;
+
+  const AbsensiPage({super.key, required this.nipBaru});
 
   @override
   State<AbsensiPage> createState() => _AbsensiPageState();
@@ -26,7 +29,6 @@ class TimeRange {
 
 class _AbsensiPageState extends State<AbsensiPage> {
   File? _selfieImage;
-  String? _nipBaru;
   String _currentLocation = 'Mendapatkan lokasi...';
   bool _isLoadingLocation = false;
   bool _isLoadingAttendance = false;
@@ -52,8 +54,8 @@ class _AbsensiPageState extends State<AbsensiPage> {
       end: const TimeOfDay(hour: 14, minute: 0),
     ),
     'Pulang': TimeRange(
-      start: const TimeOfDay(hour: 16, minute: 0),
-      end: const TimeOfDay(hour: 17, minute: 0),
+      start: const TimeOfDay(hour: 22, minute: 0),
+      end: const TimeOfDay(hour: 24, minute: 0),
     ),
   };
 
@@ -64,11 +66,6 @@ class _AbsensiPageState extends State<AbsensiPage> {
   }
 
   Future<void> _initializeData() async {
-    _nipBaru = await _getNip();
-    if (_nipBaru == null) {
-      _redirectToLogin();
-      return;
-    }
     await _getCurrentLocation();
     await _fetchLastAttendance();
   }
@@ -84,40 +81,28 @@ class _AbsensiPageState extends State<AbsensiPage> {
     }
   }
 
-  Future<String?> _getNip() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getString('nipBaru');
-    } catch (e) {
-      debugPrint('Error getting NIP: $e');
-      return null;
-    }
-  }
-
-  Future<void> _saveAuthData(String token, String nipBaru) async {
+  Future<void> _saveAuthToken(String token) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('auth_token', token);
-      await prefs.setString('nipBaru', nipBaru);
     } catch (e) {
-      debugPrint('Error saving auth data: $e');
+      debugPrint('Error saving token: $e');
     }
   }
 
-  Future<void> _clearAuthData() async {
+  Future<void> _clearAuthToken() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('auth_token');
-      await prefs.remove('nipBaru');
     } catch (e) {
-      debugPrint('Error clearing auth data: $e');
+      debugPrint('Error clearing token: $e');
     }
   }
 
   void _redirectToLogin() {
     if (!mounted) return;
     Navigator.pushNamedAndRemoveUntil(
-      context,
+      context, 
       '/login',
       (route) => false,
     );
@@ -133,7 +118,7 @@ class _AbsensiPageState extends State<AbsensiPage> {
       }
 
       final response = await http.get(
-        Uri.parse('$_baseUrl/api/last-attendance?nipBaru=$_nipBaru'),
+        Uri.parse('$_baseUrl/api/last-attendance?nip=${widget.nipBaru}'),
         headers: {
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
@@ -149,13 +134,12 @@ class _AbsensiPageState extends State<AbsensiPage> {
           });
         }
       } else if (response.statusCode == 401) {
-        await _clearAuthData();
+        await _clearAuthToken();
         _redirectToLogin();
       }
     } on TimeoutException {
       if (mounted) {
-        setState(
-            () => _attendanceError = 'Timeout mengambil data absensi terakhir');
+        setState(() => _attendanceError = 'Timeout mengambil data absensi terakhir');
       }
     } catch (e) {
       debugPrint('Error fetching last attendance: $e');
@@ -199,8 +183,7 @@ class _AbsensiPageState extends State<AbsensiPage> {
       if (mounted) {
         setState(() {
           _currentPosition = position;
-          _currentLocation =
-              '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}';
+          _currentLocation = '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}';
         });
       }
     } on TimeoutException {
@@ -255,10 +238,8 @@ class _AbsensiPageState extends State<AbsensiPage> {
       if (placemarks.isNotEmpty && mounted) {
         Placemark place = placemarks.first;
         setState(() {
-          _manualLocationAddress =
-              '${place.street}, ${place.subLocality}, ${place.locality}';
-          _currentLocation =
-              '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}';
+          _manualLocationAddress = '${place.street}, ${place.subLocality}, ${place.locality}';
+          _currentLocation = '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}';
         });
       }
     } on TimeoutException {
@@ -273,54 +254,65 @@ class _AbsensiPageState extends State<AbsensiPage> {
     }
   }
 
+  // Future<void> _takeSelfie() async {
+  //   try {
+  //     final XFile? image = await _picker.pickImage(
+  //       source: ImageSource.camera,
+  //       preferredCameraDevice: CameraDevice.front,
+  //       imageQuality: 80,
+  //     );
+
+  //     if (image != null && mounted) {
+  //       setState(() {
+  //         _selfieImage = File(image.path);
+  //         _attendanceError = null;
+  //       });
+  //     }
+  //   } catch (e) {
+  //     if (mounted) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         SnackBar(content: Text('Gagal mengambil foto: $e')),
+  //       );
+  //     }
+  //   }
+  // }
   Future<void> _takeSelfie() async {
-    try {
-      final XFile? image = await _picker.pickImage(
-        source: ImageSource.camera,
-        preferredCameraDevice: CameraDevice.front,
-        imageQuality: 80,
-        maxWidth: 1080,
-      );
+  try {
+    final XFile? image = await _picker.pickImage(
+      source: ImageSource.camera,
+      preferredCameraDevice: CameraDevice.front,
+      imageQuality: 80,
+      maxWidth: 1080, // Batasi ukuran gambar
+    );
 
-      if (image != null) {
-        final file = File(image.path);
-        final sizeInMB = await file.length() / (1024 * 1024);
-
-        if (sizeInMB > 5) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                  content: Text('Ukuran gambar terlalu besar (maks 5MB)')),
-            );
-          }
-          return;
-        }
-
+    if (image != null) {
+      final file = File(image.path);
+      final sizeInMB = await file.length() / (1024 * 1024);
+      
+      if (sizeInMB > 5) {
         if (mounted) {
-          setState(() {
-            _selfieImage = file;
-            _attendanceError = null;
-          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Ukuran gambar terlalu besar (maks 5MB)')),
+          );
         }
+        return;
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal mengambil foto: $e')),
-        );
-      }
-    }
-  }
 
-  Future<String> _convertImageToBase64(File imageFile) async {
-    try {
-      final bytes = await imageFile.readAsBytes();
-      return base64Encode(bytes);
-    } catch (e) {
-      debugPrint('Error converting image to base64: $e');
-      throw 'Gagal mengkonversi gambar';
+      if (mounted) {
+        setState(() {
+          _selfieImage = file;
+          _attendanceError = null;
+        });
+      }
+    }
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal mengambil foto: $e')),
+      );
     }
   }
+}
 
   String _translateAttendanceType(String type) {
     switch (type) {
@@ -342,8 +334,7 @@ class _AbsensiPageState extends State<AbsensiPage> {
     if (currentIndex <= 0) return true;
 
     final previousType = _attendanceSequence[currentIndex - 1];
-    return _lastAttendanceType == previousType ||
-        _lastAttendanceType == currentType;
+    return _lastAttendanceType == previousType || _lastAttendanceType == currentType;
   }
 
   bool _isWithinTolerance(String type) {
@@ -353,166 +344,290 @@ class _AbsensiPageState extends State<AbsensiPage> {
     final attendanceTime = _lastAttendanceTime!;
     final difference = now.difference(attendanceTime);
 
-    return difference.inMinutes <= 120;
+    return difference.inMinutes <= 120; // Toleransi 2 jam
   }
 
+  // String? _parseErrorMessage(String responseBody) {
+  //   try {
+  //     final json = jsonDecode(responseBody);
+  //     return json['message'] ?? json['error'] ?? json['errors']?.toString();
+  //   } catch (e) {
+  //     return null;
+  //   }
+  // }
   String? _parseErrorMessage(String responseBody) {
-    try {
-      final json = jsonDecode(responseBody);
-
-      if (json['errors'] != null) {
-        final errors = json['errors'] as Map<String, dynamic>;
-        return errors.entries.map((e) => '${e.key}: ${e.value}').join('\n');
-      }
-
-      return json['message'] ?? json['error'] ?? 'Terjadi kesalahan';
-    } catch (e) {
-      return 'Gagal memproses respons server';
+  try {
+    final json = jsonDecode(responseBody);
+    
+    if (json['errors'] != null) {
+      // Handle validation errors
+      final errors = json['errors'] as Map<String, dynamic>;
+      return errors.entries.map((e) => '${e.key}: ${e.value}').join('\n');
     }
+    
+    return json['message'] ?? json['error'] ?? 'Terjadi kesalahan';
+  } catch (e) {
+    return 'Gagal memproses respons server';
+  }
+}
+
+  // Future<void> _submitAttendance(String type) async {
+  //   if (_selfieImage == null) {
+  //     if (mounted) {
+  //       setState(() => _attendanceError = 'Harap ambil foto selfie terlebih dahulu');
+  //     }
+  //     return;
+  //   }
+
+  //   if (mounted) {
+  //     setState(() {
+  //       _isLoadingAttendance = true;
+  //       _attendanceError = null;
+  //     });
+  //   }
+
+  //   try {
+  //     final token = await _getAuthToken();
+  //     if (token == null || token.isEmpty) {
+  //       _redirectToLogin();
+  //       return;
+  //     }
+
+  //     var request = http.MultipartRequest(
+  //       'POST',
+  //       Uri.parse('$_baseUrl/api/absen'),
+  //     );
+
+  //     request.headers.addAll({
+  //       'Accept': 'application/json',
+  //       'Authorization': 'Bearer $token',
+  //       'Content-Type': 'multipart/form-data',
+  //     });
+
+  //     final position = _isManualLocation && _selectedLocation != null
+  //         ? Position(
+  //             latitude: _selectedLocation!.latitude,
+  //             longitude: _selectedLocation!.longitude,
+  //             timestamp: DateTime.now(),
+  //             accuracy: 0,
+  //             altitude: 0,
+  //             heading: 0,
+  //             speed: 0,
+  //             speedAccuracy: 0,
+  //             altitudeAccuracy: 0.0,
+  //             headingAccuracy: 0.0,
+  //           )
+  //         : _currentPosition;
+
+  //     if (position == null) throw 'Lokasi tidak valid';
+
+  //     request.fields.addAll({
+  //       'tipe': _translateAttendanceType(type),
+  //       'nipBaru': widget.nipBaru,
+  //       'lat': position.latitude.toString(),
+  //       'long': position.longitude.toString(),
+  //       'is_manual_location': _isManualLocation.toString(),
+  //     });
+
+  //     request.files.add(await http.MultipartFile.fromPath(
+  //       'gambar',
+  //       _selfieImage!.path,
+  //       contentType: MediaType('image', 'jpeg'),
+  //     ));
+
+  //     debugPrint('===== REQUEST =====');
+  //     debugPrint('URL: ${request.url}');
+  //     debugPrint('Headers: ${request.headers}');
+  //     debugPrint('Fields: ${request.fields}');
+
+  //     var response = await request.send().timeout(const Duration(seconds: 15));
+  //     final responseBody = await response.stream.bytesToString();
+
+  //     debugPrint('===== RESPONSE =====');
+  //     debugPrint('Status: ${response.statusCode}');
+  //     debugPrint('Body: $responseBody');
+
+  //     if (response.statusCode == 200) {
+  //       final jsonResponse = jsonDecode(responseBody);
+  //       if (mounted) {
+  //         setState(() {
+  //           _lastAttendanceTime = DateTime.now();
+  //           _lastAttendanceType = type;
+  //         });
+  //         ScaffoldMessenger.of(context).showSnackBar(
+  //           SnackBar(
+  //             content: Text('Absensi $type berhasil dicatat'),
+  //             backgroundColor: Colors.green,
+  //             duration: const Duration(seconds: 2),
+  //           ),
+  //         );
+  //       }
+  //     } else if (response.statusCode == 401) {
+  //       await _clearAuthToken();
+  //       _redirectToLogin();
+  //     } else {
+  //       throw _parseErrorMessage(responseBody) ?? 'Gagal melakukan absen (${response.statusCode})';
+  //     }
+  //   } on TimeoutException {
+  //     if (mounted) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         SnackBar(
+  //           content: const Text('Timeout mengirim data absensi'),
+  //           backgroundColor: Colors.red,
+  //           duration: const Duration(seconds: 3),
+  //         ),
+  //       );
+  //     }
+  //   } catch (e) {
+  //     debugPrint('Error submitting attendance: $e');
+  //     if (mounted) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         SnackBar(
+  //           content: Text(e.toString()),
+  //           backgroundColor: Colors.red,
+  //           duration: const Duration(seconds: 3),
+  //         ),
+  //       );
+  //     }
+  //   } finally {
+  //     if (mounted) {
+  //       setState(() => _isLoadingAttendance = false);
+  //     }
+  //   }
+  // }
+  Future<void> _submitAttendance(String type) async {
+  // Validasi foto selfie
+  if (_selfieImage == null) {
+    if (mounted) {
+      setState(() => _attendanceError = 'Harap ambil foto selfie terlebih dahulu');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Harap ambil foto selfie terlebih dahulu')),
+      );
+    }
+    return;
   }
 
-  Future<void> _submitAttendance(String type) async {
-    if (_selfieImage == null) {
-      if (mounted) {
-        setState(
-            () => _attendanceError = 'Harap ambil foto selfie terlebih dahulu');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Harap ambil foto selfie terlebih dahulu')),
-        );
-      }
-      return;
-    }
-
-    if (!_isManualLocation && _currentPosition == null) {
-      if (mounted) {
-        setState(() => _attendanceError = 'Lokasi diperlukan untuk absensi');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Sedang mendapatkan lokasi...')),
-        );
-        await _getCurrentLocation();
-      }
-      return;
-    }
-
-    if (_isManualLocation && _selectedLocation == null) {
-      if (mounted) {
-        setState(() => _attendanceError = 'Silakan pilih lokasi manual');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Silakan pilih lokasi manual terlebih dahulu')),
-        );
-      }
-      return;
-    }
-
-    String base64Image;
-    try {
-      base64Image = await _convertImageToBase64(_selfieImage!);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal memproses gambar: $e')),
-        );
-      }
-      return;
-    }
-
+  // Validasi lokasi
+  if (!_isManualLocation && _currentPosition == null) {
     if (mounted) {
-      setState(() {
-        _isLoadingAttendance = true;
-        _attendanceError = null;
-      });
+      setState(() => _attendanceError = 'Lokasi diperlukan untuk absensi');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sedang mendapatkan lokasi...')),
+      );
+      await _getCurrentLocation(); // Coba dapatkan lokasi lagi
+    }
+    return;
+  }
+
+  if (_isManualLocation && _selectedLocation == null) {
+    if (mounted) {
+      setState(() => _attendanceError = 'Silakan pilih lokasi manual');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Silakan pilih lokasi manual terlebih dahulu')),
+      );
+    }
+    return;
+  }
+
+  if (mounted) {
+    setState(() {
+      _isLoadingAttendance = true;
+      _attendanceError = null;
+    });
+  }
+
+  try {
+    final token = await _getAuthToken();
+    if (token == null || token.isEmpty) {
+      _redirectToLogin();
+      return;
     }
 
-    try {
-      final token = await _getAuthToken();
-      if (token == null || token.isEmpty) {
-        _redirectToLogin();
-        return;
-      }
+    var request = http.MultipartRequest(
+      'POST',
+      Uri.parse('$_baseUrl/api/absen'),
+    );
 
-      final requestData = {
-        'tipe': _translateAttendanceType(type),
-        'nipBaru': _nipBaru,
-        'lat': _isManualLocation
-            ? _selectedLocation!.latitude.toString()
-            : _currentPosition!.latitude.toString(),
-        'long': _isManualLocation
-            ? _selectedLocation!.longitude.toString()
-            : _currentPosition!.longitude.toString(),
-        'gambar': 'data:image/jpeg;base64,$base64Image',
-      };
+    request.headers.addAll({
+      'Accept': 'application/json',
+      'Authorization': 'Bearer $token',
+    });
 
-      final response = await http
-          .post(
-            Uri.parse('$_baseUrl/api/absen'),
-            headers: {
-              'Accept': 'application/json',
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode(requestData),
-          )
-          .timeout(const Duration(seconds: 15));
+    final position = _isManualLocation 
+        ? _selectedLocation!
+        : LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
 
-      final responseBody = response.body;
-      debugPrint('Response: $responseBody');
+    // Tambahkan data ke request
+    request.fields.addAll({
+      'tipe': _translateAttendanceType(type),
+      'nip': widget.nipBaru, // Pastikan field name sesuai dengan backend
+      'latitude': position.latitude.toString(),
+      'longitude': position.longitude.toString(),
+      'is_manual_location': _isManualLocation.toString(),
+      'waktu': DateTime.now().toIso8601String(), // Tambahkan timestamp
+    });
 
-      if (response.statusCode == 200) {
-        final jsonResponse = jsonDecode(responseBody);
-        if (mounted) {
-          setState(() {
-            _lastAttendanceTime = DateTime.now();
-            _lastAttendanceType = type;
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Absensi $type berhasil dicatat'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } else if (response.statusCode == 401) {
-        await _clearAuthData();
-        _redirectToLogin();
-      } else {
-        final errorMsg = _parseErrorMessage(responseBody) ??
-            'Gagal melakukan absen (${response.statusCode})';
-        throw errorMsg;
-      }
-    } on TimeoutException {
+    // Tambahkan file gambar
+    request.files.add(await http.MultipartFile.fromPath(
+      'foto', // Pastikan field name sesuai dengan backend
+      _selfieImage!.path,
+      contentType: MediaType('image', 'jpeg'),
+    ));
+
+    // Debug log
+    debugPrint('Mengirim absensi dengan data:');
+    debugPrint('NIP: ${widget.nipBaru}');
+    debugPrint('Tipe: $type');
+    debugPrint('Lokasi: ${position.latitude}, ${position.longitude}');
+    debugPrint('Manual Lokasi: $_isManualLocation');
+
+    var response = await request.send();
+    final responseBody = await response.stream.bytesToString();
+
+    if (response.statusCode == 200) {
+      final jsonResponse = jsonDecode(responseBody);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Timeout mengirim data absensi'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('Error submitting attendance: $e');
-      if (mounted) {
+        setState(() {
+          _lastAttendanceTime = DateTime.now();
+          _lastAttendanceType = type;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.toString()),
-            backgroundColor: Colors.red,
+            content: Text('Absensi $type berhasil dicatat'),
+            backgroundColor: Colors.green,
           ),
         );
       }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoadingAttendance = false);
-      }
+    } else if (response.statusCode == 401) {
+      await _clearAuthToken();
+      _redirectToLogin();
+    } else {
+      final errorMsg = _parseErrorMessage(responseBody) ?? 'Gagal melakukan absen (${response.statusCode})';
+      throw errorMsg;
+    }
+  } catch (e) {
+    debugPrint('Error submitting attendance: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString()),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  } finally {
+    if (mounted) {
+      setState(() => _isLoadingAttendance = false);
     }
   }
+}
 
+  // ==================== UI WIDGETS ====================
   Widget _buildLocationSelector() {
     return Column(
       children: [
         ListTile(
-          leading:
-              Icon(_isManualLocation ? Icons.edit_location : Icons.location_on),
+          leading: Icon(_isManualLocation ? Icons.edit_location : Icons.location_on),
           title: Text(_isManualLocation ? 'Lokasi Manual' : 'Lokasi Otomatis'),
           subtitle: Text(_isManualLocation
               ? _manualLocationAddress.isNotEmpty
@@ -564,8 +679,20 @@ class _AbsensiPageState extends State<AbsensiPage> {
     );
   }
 
-  bool _isTimeInRange(
-      TimeOfDay currentTime, TimeOfDay startTime, TimeOfDay endTime) {
+  IconData _getAttendanceIcon(String type) {
+    switch (type) {
+      case 'Pagi':
+        return Icons.wb_sunny;
+      case 'Siang':
+        return Icons.lunch_dining;
+      case 'Pulang':
+        return Icons.nightlight_round;
+      default:
+        return Icons.access_time;
+    }
+  }
+
+  bool _isTimeInRange(TimeOfDay currentTime, TimeOfDay startTime, TimeOfDay endTime) {
     final nowInMinutes = currentTime.hour * 60 + currentTime.minute;
     final startInMinutes = startTime.hour * 60 + startTime.minute;
     final endInMinutes = endTime.hour * 60 + endTime.minute;
@@ -588,40 +715,71 @@ class _AbsensiPageState extends State<AbsensiPage> {
         isWithinTolerance &&
         (_currentPosition != null || _isManualLocation);
 
-    return ConstrainedBox(
-      constraints: const BoxConstraints(
-        minWidth: 100,
-        maxWidth: 120,
-        minHeight: 80,
-      ),
+    return Expanded(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+        padding: const EdgeInsets.symmetric(horizontal: 8.0),
         child: ElevatedButton(
           style: ElevatedButton.styleFrom(
             backgroundColor: isEnabled ? Colors.blue : Colors.grey,
-            padding: const EdgeInsets.symmetric(vertical: 12),
+            padding: const EdgeInsets.symmetric(vertical: 16),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(12),
             ),
           ),
           onPressed: isEnabled ? () => _submitAttendance(type) : null,
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              Icon(
+                _getAttendanceIcon(type),
+                size: 30,
+                color: Colors.white,
+              ),
+              const SizedBox(height: 8),
               Text(
                 'Absen $type',
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 14,
+                  fontSize: 16,
                   fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              Text(
+                '${timeRange.start.hour}:${timeRange.start.minute.toString().padLeft(2, '0')} - '
+                '${timeRange.end.hour}:${timeRange.end.minute.toString().padLeft(2, '0')}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
                 ),
                 textAlign: TextAlign.center,
               ),
               if (_lastAttendanceType == type)
                 const Padding(
                   padding: EdgeInsets.only(top: 4),
-                  child:
-                      Icon(Icons.check_circle, size: 16, color: Colors.white),
+                  child: Icon(Icons.check_circle, size: 16, color: Colors.white),
+                ),
+              if (!isPreviousDone)
+                const Padding(
+                  padding: EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Lakukan absen sebelumnya',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                    ),
+                  ),
+                ),
+              if (!isWithinTolerance && _lastAttendanceType != null)
+                const Padding(
+                  padding: EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Melebihi toleransi',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -638,7 +796,7 @@ class _AbsensiPageState extends State<AbsensiPage> {
         backgroundColor: const Color(0xFFFEBA17),
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -650,11 +808,7 @@ class _AbsensiPageState extends State<AbsensiPage> {
               child: ListTile(
                 leading: const Icon(Icons.badge, color: Colors.blue),
                 title: const Text('NIP'),
-                subtitle: Text(
-                  _nipBaru ?? 'Memuat...',
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold),
-                ),
+                subtitle: Text(widget.nipBaru),
               ),
             ),
             const SizedBox(height: 16),
@@ -684,14 +838,12 @@ class _AbsensiPageState extends State<AbsensiPage> {
                         child: _selfieImage != null
                             ? ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
-                                child: Image.file(_selfieImage!,
-                                    fit: BoxFit.cover),
+                                child: Image.file(_selfieImage!, fit: BoxFit.cover),
                               )
                             : const Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(Icons.camera_alt,
-                                      size: 50, color: Colors.grey),
+                                  Icon(Icons.camera_alt, size: 50, color: Colors.grey),
                                   Text('Ambil Foto'),
                                 ],
                               ),
@@ -717,14 +869,12 @@ class _AbsensiPageState extends State<AbsensiPage> {
                     ),
                     const SizedBox(height: 8),
                     _buildLocationSelector(),
-                    if (_attendanceError != null &&
-                        _attendanceError!.contains('Lokasi'))
+                    if (_attendanceError != null && _attendanceError!.contains('Lokasi'))
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
                           _attendanceError!,
-                          style:
-                              const TextStyle(color: Colors.red, fontSize: 12),
+                          style: const TextStyle(color: Colors.red, fontSize: 12),
                         ),
                       ),
                   ],
@@ -745,8 +895,7 @@ class _AbsensiPageState extends State<AbsensiPage> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    if (_attendanceError != null &&
-                        !_attendanceError!.contains('Lokasi'))
+                    if (_attendanceError != null && !_attendanceError!.contains('Lokasi'))
                       Padding(
                         padding: const EdgeInsets.only(bottom: 16),
                         child: Text(
@@ -754,16 +903,12 @@ class _AbsensiPageState extends State<AbsensiPage> {
                           style: const TextStyle(color: Colors.red),
                         ),
                       ),
-                    SizedBox(
-                      height: 100,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _buildAttendanceButton('Pagi'),
-                          _buildAttendanceButton('Siang'),
-                          _buildAttendanceButton('Pulang'),
-                        ],
-                      ),
+                    Row(
+                      children: [
+                        _buildAttendanceButton('Pagi'),
+                        _buildAttendanceButton('Siang'),
+                        _buildAttendanceButton('Pulang'),
+                      ],
                     ),
                     if (_isLoadingAttendance)
                       const Padding(
@@ -846,8 +991,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                 Navigator.pop(context, _selectedLocation);
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text('Silakan pilih lokasi terlebih dahulu')),
+                  const SnackBar(content: Text('Silakan pilih lokasi terlebih dahulu')),
                 );
               }
             },
